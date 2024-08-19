@@ -2,25 +2,32 @@ import binascii
 import json
 import os
 import time
+import sys
 from collections import deque
 from typing import Any, Deque, Dict, List, Optional
 
 from ..h3.events import Headers
 from .packet import (
+    PACKET_TYPE_HANDSHAKE,
+    PACKET_TYPE_INITIAL,
+    PACKET_TYPE_MASK,
+    PACKET_TYPE_ONE_RTT,
+    PACKET_TYPE_RETRY,
+    PACKET_TYPE_ZERO_RTT,
     QuicFrameType,
-    QuicPacketType,
     QuicStreamFrame,
     QuicTransportParameters,
 )
 from .rangeset import RangeSet
 
+from .error_feedback import ErrorReport, QuicErrorReporter
+
 PACKET_TYPE_NAMES = {
-    QuicPacketType.INITIAL: "initial",
-    QuicPacketType.HANDSHAKE: "handshake",
-    QuicPacketType.ZERO_RTT: "0RTT",
-    QuicPacketType.ONE_RTT: "1RTT",
-    QuicPacketType.RETRY: "retry",
-    QuicPacketType.VERSION_NEGOTIATION: "version_negotiation",
+    PACKET_TYPE_INITIAL: "initial",
+    PACKET_TYPE_HANDSHAKE: "handshake",
+    PACKET_TYPE_ZERO_RTT: "0RTT",
+    PACKET_TYPE_ONE_RTT: "1RTT",
+    PACKET_TYPE_RETRY: "retry",
 }
 QLOG_VERSION = "0.3"
 
@@ -33,15 +40,16 @@ class QuicLoggerTrace:
     """
     A QUIC event trace.
 
-    Events are logged in the format defined by qlog.
+    Events are logged in the format defined by qlog draft-03.
 
     See:
-    - https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-main-schema-02
+    - https://datatracker.ietf.org/doc/html/draft-ietf-quic-qlog-main-schema
     - https://datatracker.ietf.org/doc/html/draft-marx-quic-qlog-quic-events
     - https://datatracker.ietf.org/doc/html/draft-marx-quic-qlog-h3-events
     """
 
     def __init__(self, *, is_client: bool, odcid: bytes) -> None:
+        self.error_reporter = QuicErrorReporter()
         self._odcid = odcid
         self._events: Deque[Dict[str, Any]] = deque()
         self._vantage_point = {
@@ -70,6 +78,10 @@ class QuicLoggerTrace:
         }
         if frame_type is not None:
             attrs["trigger_frame_type"] = frame_type
+
+        #error_reporter
+        err = ErrorReport(error_code,"application" if frame_type is None else "transport",reason_phrase,error_code)
+        self.error_reporter.add_error(err)
 
         return attrs
 
@@ -146,12 +158,19 @@ class QuicLoggerTrace:
     def encode_reset_stream_frame(
         self, error_code: int, final_size: int, stream_id: int
     ) -> Dict:
-        return {
+
+        frame = {
             "error_code": error_code,
             "final_size": final_size,
             "frame_type": "reset_stream",
             "stream_id": stream_id,
         }
+
+        #error_reporter
+        err = ErrorReport(error_code,"reset_stream",None,frame)
+        self.error_reporter.add_error(err)
+
+        return frame
 
     def encode_retire_connection_id_frame(self, sequence_number: int) -> Dict:
         return {
@@ -167,11 +186,17 @@ class QuicLoggerTrace:
         }
 
     def encode_stop_sending_frame(self, error_code: int, stream_id: int) -> Dict:
-        return {
+        frame = {
             "frame_type": "stop_sending",
             "error_code": error_code,
             "stream_id": stream_id,
         }
+
+        #error_reporter
+        err = ErrorReport(error_code,"stop_sending",None,frame)
+        self.error_reporter.add_error(err)
+
+        return frame
 
     def encode_stream_frame(self, frame: QuicStreamFrame, stream_id: int) -> Dict:
         return {
@@ -208,8 +233,8 @@ class QuicLoggerTrace:
                 data[param_name] = param_value
         return data
 
-    def packet_type(self, packet_type: QuicPacketType) -> str:
-        return PACKET_TYPE_NAMES[packet_type]
+    def packet_type(self, packet_type: int) -> str:
+        return PACKET_TYPE_NAMES.get(packet_type & PACKET_TYPE_MASK, "1RTT")
 
     # HTTP/3
 
@@ -273,10 +298,19 @@ class QuicLoggerTrace:
             "vantage_point": self._vantage_point,
         }
 
+    def write_error_html(self,err_trace_path:str) -> None:
+        self.error_reporter.write_html(err_trace_path)
+
 
 class QuicLogger:
     """
-    A QUIC event logger which stores traces in memory.
+    A QUIC event logger.
+
+    Serves as a container for traces in the format defined by qlog draft-03.
+
+    See:
+    - https://datatracker.ietf.org/doc/html/draft-marx-qlog-main-schema-03
+    - https://datatracker.ietf.org/doc/html/draft-marx-qlog-event-definitions-quic-h3-02
     """
 
     def __init__(self) -> None:
@@ -314,9 +348,17 @@ class QuicFileLogger(QuicLogger):
 
     def end_trace(self, trace: QuicLoggerTrace) -> None:
         trace_dict = trace.to_dict()
+
+        err_trace_path = os.path.join(
+            self.path, trace_dict["common_fields"]["ODCID"] + ".html"
+        )
+        print("New error log.", file=sys.stderr) #FLUSH
+        trace.write_error_html(err_trace_path)
+
         trace_path = os.path.join(
             self.path, trace_dict["common_fields"]["ODCID"] + ".qlog"
         )
+        print("New qlog.", file=sys.stderr) #FLUSH
         with open(trace_path, "w") as logger_fp:
             json.dump(
                 {
