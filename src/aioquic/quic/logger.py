@@ -50,6 +50,16 @@ class QuicLoggerTrace:
         }
 
     # QUIC
+    
+    # MODIFICATION
+    def encode_extension_frame(
+        self, bytes:int
+    ) -> Dict:
+        return {
+            "bytes": bytes,
+            "frame_type": "extension",
+        }
+    # END MODIFICATION
 
     def encode_ack_frame(self, ranges: RangeSet, delay: float) -> Dict:
         return {
