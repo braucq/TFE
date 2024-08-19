@@ -3006,14 +3006,24 @@ class QuicConnection:
         else:
             return
         space = self._spaces[tls.Epoch.ONE_RTT]
+        
+        # MODIFICATIONS
+        dcount = -5
 
         while True:
+            dcount += 1
+        
             # apply pacing, except if we have ACKs to send
             if space.ack_at is None or space.ack_at >= now:
                 self._pacing_at = self._loss._pacer.next_send_time(now=now)
                 if self._pacing_at is not None:
                     break
             builder.start_packet(packet_type, crypto)
+            
+            if dcount>=0:
+                self._write_max_stream_update(builder=builder)
+                dcount -= 5 #the error may occur several times
+            # END MODIFICATION
 
             if self._handshake_complete:
                 # ACK
@@ -3292,6 +3302,38 @@ class QuicConnection:
             if limit.used * 2 > limit.value:
                 limit.value *= 2
                 self._logger.debug("Local %s raised to %d", limit.name, limit.value)
+            if limit.value != limit.sent:
+                buf = builder.start_frame(
+                    limit.frame_type,
+                    capacity=CONNECTION_LIMIT_FRAME_CAPACITY,
+                    handler=self._on_connection_limit_delivery,
+                    handler_args=(limit,),
+                )
+                buf.push_uint_var(limit.value)
+                limit.sent = limit.value
+
+                # log frame
+                if self._quic_logger is not None:
+                    builder.quic_logger_frames.append(
+                        self._quic_logger.encode_connection_limit_frame(
+                            frame_type=limit.frame_type,
+                            maximum=limit.value,
+                        )
+                    )
+                    
+    # MODIFICATIONS - code is in part from method above
+    def _write_max_streams_update(
+        self, builder: QuicPacketBuilder
+    ) -> None:
+        """
+        Lower MAX_STREAMS
+        """
+        for limit in (
+            self._local_max_streams_bidi,
+            self._local_max_streams_uni,
+        ):
+            limit.value /= 2
+            self._logger.debug("Local %s lowered to %d", limit.name, limit.value)
             if limit.value != limit.sent:
                 buf = builder.start_frame(
                     limit.frame_type,
