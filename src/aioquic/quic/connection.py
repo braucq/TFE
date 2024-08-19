@@ -324,14 +324,21 @@ class QuicConnection:
         self._local_max_stream_data_bidi_local = configuration.max_stream_data
         self._local_max_stream_data_bidi_remote = configuration.max_stream_data
         self._local_max_stream_data_uni = configuration.max_stream_data
+        
+        # MODIFICATION
+        max_streams_modified = 2**61
         self._local_max_streams_bidi = Limit(
             frame_type=QuicFrameType.MAX_STREAMS_BIDI,
             name="max_streams_bidi",
-            value=128,
+            value=max_streams_modified,
         )
         self._local_max_streams_uni = Limit(
-            frame_type=QuicFrameType.MAX_STREAMS_UNI, name="max_streams_uni", value=128
+            frame_type=QuicFrameType.MAX_STREAMS_UNI,
+            name="max_streams_uni",
+            value=max_streams_modified
         )
+        # END MODIFICATION
+        
         self._local_next_stream_id_bidi = 0 if self._is_client else 1
         self._local_next_stream_id_uni = 2 if self._is_client else 3
         self._loss_at: Optional[float] = None
@@ -2647,9 +2654,7 @@ class QuicConnection:
                 QuicConnectionId(
                     cid=os.urandom(self._configuration.connection_id_length),
                     sequence_number=self._host_cid_seq,
-                    # TEST MODIFICATION
-                    stateless_reset_token= b'\0'*16,#os.urandom(16),
-                    # END MODIFICATION 
+                    stateless_reset_token=os.urandom(16),
                 )
             )
             self._host_cid_seq += 1
