@@ -1804,9 +1804,7 @@ class QuicConnection:
         This adjusts the amount of data we can send on a specific stream.
         """
         stream_id = buf.pull_uint_var()
-        # MODIFICATION
-        max_stream_data = buf.pull_uint_var()*1.99
-        # END MODIFICATION
+        max_stream_data = buf.pull_uint_var()
 
         # log frame
         if self._quic_logger is not None:
@@ -3109,6 +3107,10 @@ class QuicConnection:
                     self._datagrams_pending.popleft()
                 except QuicPacketBuilderStop:
                     break
+                    
+            # MODIFICATION
+            dcount = -3
+            # END MODIFICATION
 
             sent: Set[QuicStream] = set()
             discarded: Set[QuicStream] = set()
@@ -3131,6 +3133,7 @@ class QuicConnection:
                         self._write_reset_stream_frame(builder=builder, stream=stream)
                     elif not stream.is_blocked and not stream.sender.buffer_is_empty:
                         # STREAM
+                        # MODIFICATION
                         used = self._write_stream_frame(
                             builder=builder,
                             space=space,
@@ -3141,8 +3144,11 @@ class QuicConnection:
                                 - self._remote_max_data_used,
                                 stream.max_stream_data_remote,
                             ),
+                            faulty = False if dcount else True
                         )
                         self._remote_max_data_used += used
+                        dcount += 1
+                        # END MODIFICATION
                         if used > 0:
                             sent.add(stream)
 
@@ -3523,6 +3529,7 @@ class QuicConnection:
         space: QuicPacketSpace,
         stream: QuicStream,
         max_offset: int,
+        faulty: bool,
     ) -> int:
         # the frame data size is constrained by our peer's MAX_DATA and
         # the space available in the current packet
@@ -3536,9 +3543,9 @@ class QuicConnection:
             )
         )
         previous_send_highest = stream.sender.highest_offset
-        frame = stream.sender.get_frame(
-            builder.remaining_flight_space - frame_overhead, max_offset
-        )
+        # TEST MODIFICATION
+        frame = stream.sender.get_empty_frame_with_offset() if faulty else stream.sender.get_frame(builder.remaining_flight_space - frame_overhead, max_offset)
+        # END MODIFICATION
 
         if frame is not None:
             frame_type = QuicFrameType.STREAM_BASE | 2  # length
