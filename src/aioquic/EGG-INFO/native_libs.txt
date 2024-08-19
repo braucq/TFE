@@ -1,0 +1,2 @@
+aioquic/_buffer.abi3.so
+aioquic/_crypto.abi3.so
