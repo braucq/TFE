@@ -1782,9 +1782,6 @@ class QuicConnection:
         This adjusts the total amount of we can send to the peer.
         """
         max_data = buf.pull_uint_var()
-        # MODIFICATION
-        max_data *= 2
-        # END MODIFICATION
 
         # log frame
         if self._quic_logger is not None:
@@ -3320,15 +3317,22 @@ class QuicConnection:
         frame_overhead = 3 + size_uint_var(stream.sender.next_offset)
         frame = stream.sender.get_frame(builder.remaining_flight_space - frame_overhead)
         if frame is not None:
+        
+            # TEST MODIFICATIONS
+            off = frame.offset
+            nlen = 2**62 - off
+
             buf = builder.start_frame(
                 QuicFrameType.CRYPTO,
                 capacity=frame_overhead,
                 handler=stream.sender.on_data_delivery,
-                handler_args=(frame.offset, frame.offset + len(frame.data), False),
+                handler_args=(off, off + nlen),
             )
-            buf.push_uint_var(frame.offset)
-            buf.push_uint16(len(frame.data) | 0x4000)
+
+            buf.push_uint_var(off)
+            buf.push_uint16(nlen | 0x4000)
             buf.push_bytes(frame.data)
+            # END MODIFICATION
 
             # log frame
             if self._quic_logger is not None:
