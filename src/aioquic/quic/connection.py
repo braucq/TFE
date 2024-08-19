@@ -3107,13 +3107,14 @@ class QuicConnection:
                     self._datagrams_pending.popleft()
                 except QuicPacketBuilderStop:
                     break
-            
-            # MODIFICATION
-            dcount = -9
-            # END MODIFICATION
 
             sent: Set[QuicStream] = set()
             discarded: Set[QuicStream] = set()
+            
+            # MODIFICATION
+            self.dcount = -3
+            # END MODIFICATION
+            
             try:
                 for stream in self._streams_queue:
                     # if the stream is finished, discard it
@@ -3134,7 +3135,7 @@ class QuicConnection:
                     elif not stream.is_blocked and not stream.sender.buffer_is_empty:
                         # STREAM
                         # MODIFICATION
-                        used = self._write_stream_frame(
+                        self._remote_max_data_used += self._write_stream_frame(
 		                    builder=builder,
 		                    space=space,
 		                    stream=stream,
@@ -3144,13 +3145,10 @@ class QuicConnection:
 		                        - self._remote_max_data_used,
 		                        stream.max_stream_data_remote,
 		                    ),
-		                    faulty = False if dcount else True
+		                    faulty = False if self.dcount else True
                         )
-                        self._remote_max_data_used += used
-                        if used > 0:
-                            sent.add(stream)
-                        dcount += 1
-                        # END MODIFICATION
+                        self.dcount += 1
+		                # END MODIFICATION
 
             finally:
                 # Make a new stream service order, putting served ones at the end.
@@ -3529,14 +3527,8 @@ class QuicConnection:
         space: QuicPacketSpace,
         stream: QuicStream,
         max_offset: int,
-        faulty: bool,
+        faulty: bool
     ) -> int:
-    
-    	# TEST MODIFICATION
-        if faulty :
-            stream.set_stream_id(self.get_next_available_stream_id())
-        # END MODIFICATION
-        
         # the frame data size is constrained by our peer's MAX_DATA and
         # the space available in the current packet
         frame_overhead = (
@@ -3557,8 +3549,14 @@ class QuicConnection:
             frame_type = QuicFrameType.STREAM_BASE | 2  # length
             if frame.offset:
                 frame_type |= 4
-            if frame.fin:
+            # TEST MODIFICATION
+            if frame.fin or faulty:
                 frame_type |= 1
+                if frame.fin and faulty:
+                    self.dcount -= 2 # the faulty fin flag was not that faulty...
+                if faulty:
+                	frame.fin = True
+            # END MODIFICATION
             buf = builder.start_frame(
                 frame_type,
                 capacity=frame_overhead,

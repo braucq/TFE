@@ -40,9 +40,6 @@ class QuicStreamReceiver:
         self._ranges = RangeSet()
         self._stream_id = stream_id
         self._stop_error_code: Optional[int] = None
-        
-    def set_stream_id(self, new_id) -> None:
-    	self._stream_id = new_id
 
     def get_stop_frame(self) -> QuicStopSendingFrame:
         self.stop_pending = False
@@ -200,9 +197,6 @@ class QuicStreamSender:
             return self._pending[0].start
         except IndexError:
             return self._buffer_stop
-            
-    def set_stream_id(self, new_id) -> None:
-    	self._stream_id = new_id
 
     def get_frame(
         self, max_size: int, max_offset: Optional[int] = None
@@ -368,6 +362,3 @@ class QuicStream:
     @property
     def is_finished(self) -> bool:
         return self.receiver.is_finished and self.sender.is_finished
-        
-    def set_stream_id(self, new_id) -> None:
-    	self.stream_id = new_id
