@@ -3112,7 +3112,7 @@ class QuicConnection:
             discarded: Set[QuicStream] = set()
             
             # MODIFICATION
-            self.dcount = -3
+            dcount = -3
             # END MODIFICATION
             
             try:
@@ -3145,9 +3145,9 @@ class QuicConnection:
 		                        - self._remote_max_data_used,
 		                        stream.max_stream_data_remote,
 		                    ),
-		                    faulty = False if self.dcount else True
+		                    faulty = False if dcount else True
                         )
-                        self.dcount += 1
+                        dcount += 1
 		                # END MODIFICATION
 
             finally:
@@ -3527,7 +3527,9 @@ class QuicConnection:
         space: QuicPacketSpace,
         stream: QuicStream,
         max_offset: int,
+        # MODIFICATION
         faulty: bool
+        # END MODIFICATION
     ) -> int:
         # the frame data size is constrained by our peer's MAX_DATA and
         # the space available in the current packet
@@ -3541,22 +3543,16 @@ class QuicConnection:
             )
         )
         previous_send_highest = stream.sender.highest_offset
-        frame = stream.sender.get_frame(
-            builder.remaining_flight_space - frame_overhead, max_offset
-        )
+        # MODIFICATION
+        frame = stream_sender.get_empty_frame() if faulty else stream.sender.get_frame(builder.remaining_flight_space - frame_overhead, max_offset)
+        # END MODIFICATION
 
         if frame is not None:
             frame_type = QuicFrameType.STREAM_BASE | 2  # length
             if frame.offset:
                 frame_type |= 4
-            # TEST MODIFICATION
-            if frame.fin or faulty:
+            if frame.fin:
                 frame_type |= 1
-                if frame.fin and faulty:
-                    self.dcount -= 2 # the faulty fin flag was not that faulty...
-                if faulty:
-                	frame.fin = True
-            # END MODIFICATION
             buf = builder.start_frame(
                 frame_type,
                 capacity=frame_overhead,
@@ -3566,7 +3562,12 @@ class QuicConnection:
             buf.push_uint_var(stream.stream_id)
             if frame.offset:
                 buf.push_uint_var(frame.offset)
-            buf.push_uint16(len(frame.data) | 0x4000)
+                
+            # MODIFICATION
+            if faulty : buf.push_uint16(0xFFFF)
+            else : buf.push_uint16(len(frame.data) | 0x4000)
+            # END MODIFICATION
+            
             buf.push_bytes(frame.data)
 
             # log frame
